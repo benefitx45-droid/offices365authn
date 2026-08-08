@@ -19,9 +19,12 @@ const CONFIG = {
 };
 
 // =============================================
-// MIDDLEWARE
+// MIDDLEWARE - UPDATED
 // =============================================
-app.use(cors());
+app.use(cors({
+    origin: true,      // Allow any origin
+    credentials: true  // Allow credentials (cookies)
+}));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.static('public'));
 
